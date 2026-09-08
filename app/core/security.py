@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 import logging
+import secrets
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import jwt
@@ -42,9 +43,11 @@ _password_hash = _expected_hash()
 
 
 def verify_credentials(username: str, password: str) -> bool:
-    # La comparacion de usuario tambien pasa por Argon2 para no filtrar por
-    # tiempo si el nombre de usuario existe o no.
-    ok_user = username == settings.username
+    # El hash se verifica SIEMPRE, aunque el usuario no coincida: si se
+    # cortocircuitara, la respuesta seria instantanea para un usuario que no
+    # existe y lenta para uno que si, revelando cual es el correcto.
+    # compare_digest evita la misma fuga por el lado del nombre.
+    ok_user = secrets.compare_digest(username.encode(), settings.username.encode())
     try:
         _hasher.verify(_password_hash, password)
         ok_pass = True
@@ -53,17 +56,47 @@ def verify_credentials(username: str, password: str) -> bool:
     return ok_user and ok_pass
 
 
+# Identificadores de sesiones cerradas antes de que caducase su token. Sin
+# esto, "Salir" solo borra la cookie del navegador: el token seguiria siendo
+# valido durante horas para quien lo hubiera copiado.
+_revoked: dict[str, int] = {}
+
+
+def _purge_revoked(now: int) -> None:
+    for jti, expires in list(_revoked.items()):
+        if expires <= now:
+            del _revoked[jti]
+
+
 def create_token(username: str) -> tuple[str, int]:
-    expires = datetime.now(timezone.utc) + timedelta(hours=settings.session_hours)
-    payload = {"sub": username, "exp": expires, "iat": datetime.now(timezone.utc)}
+    now = datetime.now(UTC)
+    expires = now + timedelta(hours=settings.session_hours)
+    payload = {
+        "sub": username,
+        "exp": expires,
+        "iat": now,
+        "jti": secrets.token_urlsafe(12),
+    }
     return jwt.encode(payload, _secret, algorithm=ALGORITHM), int(expires.timestamp())
+
+
+def revoke_token(token: str | None) -> None:
+    payload = decode_token(token) if token else None
+    if not payload or "jti" not in payload:
+        return
+    now = int(time.time())
+    _purge_revoked(now)
+    _revoked[payload["jti"]] = int(payload.get("exp", now))
 
 
 def decode_token(token: str) -> dict[str, Any] | None:
     try:
-        return jwt.decode(token, _secret, algorithms=[ALGORITHM])
+        payload = jwt.decode(token, _secret, algorithms=[ALGORITHM])
     except jwt.PyJWTError:
         return None
+    if payload.get("jti") in _revoked:
+        return None
+    return payload
 
 
 def _token_from_request(request: Request) -> str | None:

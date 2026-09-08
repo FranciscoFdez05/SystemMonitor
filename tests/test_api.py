@@ -131,9 +131,11 @@ def test_websocket_requires_a_session(client):
     from starlette.websockets import WebSocketDisconnect
 
     client.cookies.clear()
-    with pytest.raises(WebSocketDisconnect) as excinfo:
-        with client.websocket_connect("/ws") as socket:
-            socket.receive_json()
+    with (
+        pytest.raises(WebSocketDisconnect) as excinfo,
+        client.websocket_connect("/ws") as socket,
+    ):
+        socket.receive_json()
     assert excinfo.value.code == 4401
 
 

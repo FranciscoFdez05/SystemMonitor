@@ -23,6 +23,10 @@ os.environ.update({
     "SM_PERSIST_INTERVAL": "3600",
     "SM_RETENTION_DAYS": "1",
     "SM_LOGIN_MAX_ATTEMPTS": "3",
+    # TestClient usa "testserver" como Host; no se incluye en la lista
+    # por defecto de la aplicacion para no llevar un nombre de test a
+    # produccion.
+    "SM_ALLOWED_HOSTS": "testserver",
 })
 
 import pytest  # noqa: E402

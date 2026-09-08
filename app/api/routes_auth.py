@@ -8,7 +8,14 @@ from fastapi import APIRouter, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
 
 from ..config import settings
-from ..core.security import COOKIE_NAME, RequireUser, create_token, throttle, verify_credentials
+from ..core.security import (
+    COOKIE_NAME,
+    RequireUser,
+    create_token,
+    revoke_token,
+    throttle,
+    verify_credentials,
+)
 from ..storage.db import db
 
 log = logging.getLogger(__name__)
@@ -52,8 +59,10 @@ async def login(payload: LoginIn, request: Request, response: Response) -> dict:
         COOKIE_NAME, token,
         max_age=settings.session_hours * 3600,
         httponly=True,          # inaccesible desde JS: limita el robo por XSS
+        # Lax impide que la cookie viaje en peticiones POST/DELETE originadas
+        # en otro sitio, que es la proteccion CSRF de este panel.
         samesite="lax",
-        secure=False,           # la LAN va por HTTP; con TLS delante, ponlo a True
+        secure=settings.cookie_secure,
         path="/",
     )
     await db.audit(payload.username, ip, "login", "sesion iniciada")
@@ -61,7 +70,10 @@ async def login(payload: LoginIn, request: Request, response: Response) -> dict:
 
 
 @router.post("/logout")
-async def logout(response: Response) -> dict:
+async def logout(request: Request, response: Response) -> dict:
+    # Borrar la cookie solo afecta a este navegador. Se invalida ademas el
+    # token en el servidor para que una copia robada tampoco sirva.
+    revoke_token(request.cookies.get(COOKIE_NAME))
     response.delete_cookie(COOKIE_NAME, path="/")
     return {"ok": True}
 

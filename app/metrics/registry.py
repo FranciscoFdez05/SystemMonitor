@@ -51,6 +51,11 @@ class MetricsRegistry:
         }
         self.all = {**self._fast, **self._slow}
 
+    @property
+    def slow_channels(self) -> frozenset[str]:
+        """Canales caros. El scheduler decide con esto cuales puede omitir."""
+        return frozenset(self._slow)
+
     async def fast_snapshot(self) -> dict[str, Any]:
         return {name: await c.acollect() for name, c in self._fast.items()}
 

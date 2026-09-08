@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -10,9 +11,17 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from .alerts.engine import engine
-from .api import (routes_alerts, routes_auth, routes_health, routes_metrics,
-                  routes_network, routes_processes, ws)
+from .api import (
+    routes_alerts,
+    routes_auth,
+    routes_health,
+    routes_metrics,
+    routes_network,
+    routes_processes,
+    ws,
+)
 from .config import BASE_DIR, settings
+from .core.hardening import HostCheckMiddleware, SecurityHeadersMiddleware
 from .core.scheduler import scheduler
 from .core.security import COOKIE_NAME, decode_token
 from .storage.db import db
@@ -26,8 +35,22 @@ log = logging.getLogger("systemmonitor")
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 
+def _warn_if_root() -> None:
+    """Avisa si el monitor corre como root.
+
+    Con pid: host y sin privilegios rebajados, un fallo en esta aplicacion es
+    un fallo con permisos totales sobre el equipo. Merece una linea en el log
+    cada arranque, no quedar escondido en la configuracion.
+    """
+    if hasattr(os, "getuid") and os.getuid() == 0:
+        log.warning(
+            "ejecutandose como root. El contenedor esta pensado para correr "
+            "como usuario sin privilegios; revisa el despliegue.")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    _warn_if_root()
     await db.connect()
     await engine.load()
     await scheduler.start()
@@ -49,6 +72,11 @@ app = FastAPI(
     redoc_url=None,
     openapi_url=None,
 )
+
+# El orden importa: el ultimo anadido es el primero que ve la peticion, asi
+# que la comprobacion de Host va delante de todo lo demas.
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(HostCheckMiddleware)
 
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 

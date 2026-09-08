@@ -67,7 +67,7 @@ class Scheduler:
 
     def _on_subscriptions_changed(self, channels: set[str]) -> None:
         """Al suscribirse alguien a un canal lento, se le sirve sin esperar al tick."""
-        if channels & registry._slow.keys():
+        if channels & registry.slow_channels:
             self._wake_slow.set()
 
     # ---------------------------------------------------------------- bucles
@@ -97,7 +97,7 @@ class Scheduler:
         while self._running:
             started = time.monotonic()
             try:
-                wanted = (hub.active_channels() & registry._slow.keys()) | ALWAYS_ON_SLOW
+                wanted = (hub.active_channels() & registry.slow_channels) | ALWAYS_ON_SLOW
                 snapshot = await registry.slow_snapshot(wanted)
                 # Merge en vez de reemplazo: si nadie mira procesos, se conserva
                 # la ultima lista conocida en vez de dejar el canal vacio.
@@ -120,7 +120,7 @@ class Scheduler:
             try:
                 await asyncio.wait_for(self._wake_slow.wait(),
                                        max(0.1, settings.slow_interval - elapsed))
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass
             finally:
                 self._wake_slow.clear()

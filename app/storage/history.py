@@ -78,13 +78,18 @@ class HistoryAggregator:
         ts = int(time.time()) // 60 * 60
         row = {key: self._average(key) for key in self.FIELDS if key != "disk_pct"}
         row["disk_pct"] = self._disk_pct
+        peak = round(self._cpu_peak, 2)
+        # El acumulador se vacia ANTES del await. Si se reseteara despues, las
+        # muestras que el tick rapido va anadiendo mientras SQLite escribe
+        # entrarian en el acumulador viejo y se descartarian sin guardarse.
+        self.reset()
         try:
             await db.execute(
                 "INSERT OR REPLACE INTO samples"
                 " (ts, cpu_pct, cpu_peak, temp_c, freq_mhz, mem_pct, mem_used,"
                 "  mem_total, swap_pct, net_rx, net_tx, disk_pct, load1)"
                 " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (ts, row["cpu_pct"], round(self._cpu_peak, 2), row["temp_c"],
+                (ts, row["cpu_pct"], peak, row["temp_c"],
                  row["freq_mhz"], row["mem_pct"], row["mem_used"], row["mem_total"],
                  row["swap_pct"], row["net_rx"], row["net_tx"], row["disk_pct"],
                  row["load1"]),
@@ -92,8 +97,6 @@ class HistoryAggregator:
         except Exception:
             log.exception("no se pudo escribir la muestra del historico")
             return False
-        finally:
-            self.reset()
         return True
 
 
@@ -105,7 +108,10 @@ async def query_range(minutes: int, max_points: int = 600) -> dict[str, Any]:
     """
     minutes = max(1, min(minutes, 60 * 24 * 31))
     since = int(time.time()) - minutes * 60
-    bucket = max(60, (minutes * 60) // max(1, max_points) // 60 * 60)
+    # Se redondea el cubo HACIA ARRIBA al minuto. Truncando, un rango de 24 h
+    # con max_points=600 daba cubos de 120 s y 720 puntos: mas de los pedidos.
+    buckets_needed = -(-minutes // max(1, max_points))
+    bucket = max(60, buckets_needed * 60)
 
     rows = await db.fetch_all(
         "SELECT (ts / ?) * ? AS ts,"

@@ -20,42 +20,5 @@
   </form>
 </div>
 
-<script type="module">
-  const form = document.getElementById('login-form');
-  const errorBox = document.getElementById('login-error');
-  const submit = document.getElementById('submit');
-
-  form.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    errorBox.hidden = true;
-    submit.disabled = true;
-    submit.textContent = 'Comprobando…';
-    try {
-      const response = await fetch('/api/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          username: form.username.value,
-          password: form.password.value,
-        }),
-      });
-      if (response.ok) {
-        // La cookie de sesion ya viene puesta en la respuesta.
-        window.location.href = '/';
-        return;
-      }
-      const data = await response.json().catch(() => ({}));
-      errorBox.textContent = data.detail || 'No se pudo iniciar sesion';
-      errorBox.hidden = false;
-      form.password.value = '';
-      form.password.focus();
-    } catch {
-      errorBox.textContent = 'No hay conexion con el servidor';
-      errorBox.hidden = false;
-    } finally {
-      submit.disabled = false;
-      submit.textContent = 'Entrar';
-    }
-  });
-</script>
+<script type="module" src="/static/js/login.js"></script>
 {% endblock %}

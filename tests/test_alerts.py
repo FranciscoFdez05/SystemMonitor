@@ -15,9 +15,9 @@ from app.alerts.rules import Rule
 
 
 def make_rule(**overrides) -> Rule:
-    base = dict(id=1, name="prueba", metric="cpu", target="", operator="gt",
-                threshold=90.0, duration_s=60, cooldown_s=900, sinks=["log"],
-                enabled=True, created_at=0)
+    base = {"id": 1, "name": "prueba", "metric": "cpu", "target": "",
+            "operator": "gt", "threshold": 90.0, "duration_s": 60,
+            "cooldown_s": 900, "sinks": ["log"], "enabled": True, "created_at": 0}
     base.update(overrides)
     return Rule(**base)
 

@@ -1,0 +1,16 @@
+# Configuracion explicita para que el linter de CI y el local coincidan.
+line-length = 100
+target-version = "py311"
+
+[lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "C4"]
+ignore = [
+    # El formateo de las lineas largas se cuida a mano; avisar por cada una
+    # solo genera ruido en un proyecto que ya respeta el ancho.
+    "E501",
+]
+
+[lint.per-file-ignores]
+# Los tests fijan variables de entorno antes de importar la aplicacion: la
+# configuracion es un singleton que se construye al importar el modulo.
+"tests/conftest.py" = ["E402"]

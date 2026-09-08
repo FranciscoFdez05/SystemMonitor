@@ -1,0 +1,114 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Tests (Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.11 es el minimo (se usa datetime.UTC); la imagen Docker va con 3.12.
+        python: ["3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Instalar dependencias
+        run: pip install -r requirements-dev.txt
+
+      - name: Lint
+        run: |
+          pip install ruff
+          ruff check app tests
+
+      - name: Tests
+        run: pytest -q
+
+      # Los colectores se contrastan de verdad sobre Linux: aqui si existen
+      # /proc, /sys y una particion raiz, a diferencia del desarrollo en Windows.
+      - name: Comprobar los colectores sobre Linux real
+        run: python -m app.metrics.dump cpu memory disk system
+
+  docker:
+    name: Imagen Docker
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      # arm64 es el objetivo real (Raspberry Pi 4/5 con Ubuntu Server de 64
+      # bits); amd64 se construye ademas para detectar antes cualquier fallo.
+      - name: Construir para amd64 y arm64
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  smoke:
+    name: Arranque en contenedor
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Construir la imagen
+        run: docker build -f deploy/Dockerfile -t systemmonitor:ci .
+
+      # Arranque real con acceso al host, igual que en el compose, para que un
+      # fallo de permisos o de rutas montadas salga aqui y no en la Pi.
+      - name: Arrancar y comprobar /health
+        run: |
+          docker run -d --name sm \
+            --pid host --network host \
+            -e SM_USERNAME=ci -e SM_PASSWORD=contrasena-de-prueba \
+            -e SM_PORT=8080 -e SM_HOST_ROOT=/host/root -e SM_SYS_PATH=/host/sys \
+            -v /:/host/root:ro -v /sys:/host/sys:ro \
+            systemmonitor:ci
+
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8080/health > /dev/null; then break; fi
+            sleep 1
+          done
+
+          echo "--- /health ---"
+          curl -fsS http://127.0.0.1:8080/health | tee /tmp/health.json
+          grep -q '"status":"ok"' /tmp/health.json
+
+          echo "--- login y metricas ---"
+          curl -fsS -c /tmp/ck.txt -X POST http://127.0.0.1:8080/api/login \
+            -H 'Content-Type: application/json' \
+            -d '{"username":"ci","password":"contrasena-de-prueba"}' > /dev/null
+          curl -fsS -b /tmp/ck.txt http://127.0.0.1:8080/api/metrics/now \
+            | python3 -c "import json,sys; d=json.load(sys.stdin); \
+              print('canales:', sorted(d)); \
+              assert d['memory']['total'] > 0, 'RAM no detectada'; \
+              assert d['disk']['partitions'], 'sin particiones'"
+
+      - name: Log del contenedor si algo falla
+        if: failure()
+        run: docker logs sm
+
+      - name: Limpiar
+        if: always()
+        run: docker rm -f sm || true

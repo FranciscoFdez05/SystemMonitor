@@ -114,7 +114,7 @@ export class ProcessTable {
         <td class="num">${bytes(row.rss)}</td>
         <td class="num">${row.threads}</td>
         <td class="dim">${escapeHtml(row.status)}</td>
-        <td class="dim">${duration(Date.now() / 1000 - row.started)}</td>
+        <td class="dim">${row.started ? duration(Date.now() / 1000 - row.started) : '—'}</td>
         <td>${this.canKill
           ? `<button class="danger" data-pid="${row.pid}" data-name="${escapeHtml(row.name)}">Terminar</button>`
           : '<span class="dim">—</span>'}</td>

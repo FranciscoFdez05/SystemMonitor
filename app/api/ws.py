@@ -10,8 +10,8 @@ import asyncio
 import logging
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
-from starlette.websockets import WebSocketState
 
+from ..core.hardening import origin_is_same_site
 from ..core.hub import Client, hub
 from ..core.scheduler import scheduler
 from ..core.security import user_from_websocket
@@ -22,6 +22,7 @@ router = APIRouter()
 
 VALID_CHANNELS = set(FAST_CHANNELS) | set(SLOW_CHANNELS)
 CLOSE_UNAUTHORIZED = 4401
+CLOSE_FORBIDDEN_ORIGIN = 4403
 
 
 async def _reader(client: Client) -> None:
@@ -56,6 +57,16 @@ async def _reader(client: Client) -> None:
             client.offer({"type": "pong", "data": {}})
 
 
+def _discard(task: asyncio.Task) -> None:
+    """Marca el resultado como consumido.
+
+    Sin esto, asyncio avisa por consola de "excepcion nunca recuperada" cuando
+    la tarea termina con el error de socket cerrado, que aqui es lo normal.
+    """
+    if not task.cancelled():
+        task.exception()
+
+
 async def _writer(client: Client) -> None:
     """Envia lo que el hub va dejando en la cola del cliente."""
     while True:
@@ -65,6 +76,13 @@ async def _writer(client: Client) -> None:
 
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket, token: str | None = Query(default=None)):
+    if not origin_is_same_site(websocket.headers):
+        # Cierre sin aceptar: no hay nada que negociar con un origen ajeno.
+        log.warning("handshake WebSocket rechazado desde origen %r",
+                    websocket.headers.get("origin"))
+        await websocket.close(code=CLOSE_FORBIDDEN_ORIGIN)
+        return
+
     username = user_from_websocket(dict(websocket.cookies), token)
     if not username:
         # Se acepta para poder cerrar con un codigo propio: si se rechaza el
@@ -106,12 +124,15 @@ async def websocket_endpoint(websocket: WebSocket, token: str | None = Query(def
     except Exception:
         log.exception("error en la conexion WebSocket del cliente %s", client.id)
     finally:
-        reader.cancel()
-        writer.cancel()
-        await asyncio.gather(reader, writer, return_exceptions=True)
+        # El cierre no espera a nada a proposito. Cancelar y esperar a las
+        # tareas exige otra vuelta del bucle de eventos, y para entonces el
+        # cliente ya puede haber cerrado la conexion entera: el endpoint se
+        # quedaba a medio desmontar y quien lo invoca lo cancelaba, que es de
+        # donde salia un CancelledError intermitente al cerrar la pestana.
+        # Cancelar basta: el bucle las recoge por su cuenta.
         hub.unregister(client)
-        if websocket.client_state is not WebSocketState.DISCONNECTED:
-            try:
-                await websocket.close()
-            except RuntimeError:
-                pass
+        for task in (reader, writer):
+            task.cancel()
+            task.add_done_callback(_discard)
+        # El socket tampoco se cierra a mano: el servidor ASGI lo cierra al
+        # retornar el endpoint.

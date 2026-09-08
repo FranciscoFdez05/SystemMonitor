@@ -1,5 +1,7 @@
 # SystemMonitor
 
+[![CI](../../actions/workflows/ci.yml/badge.svg)](../../actions/workflows/ci.yml)
+
 Panel de monitorización en tiempo real para Raspberry Pi (Ubuntu Server), accesible
 desde cualquier dispositivo de la red local. FastAPI + WebSockets + SQLite, servido
 en un único contenedor.
@@ -122,9 +124,23 @@ se comunica solo con color: siempre hay icono o texto al lado.
 ## Seguridad
 
 - Contraseña hasheada con **Argon2id**; sesión en **JWT dentro de una cookie httpOnly**,
-  inaccesible desde JavaScript.
+  inaccesible desde JavaScript. El hash se verifica siempre, aunque el usuario no exista,
+  para no delatar por tiempo cuál es el correcto.
+- **Cerrar sesión invalida el token en el servidor**, no solo borra la cookie: una copia
+  robada deja de servir en el acto.
 - Bloqueo temporal por IP tras varios intentos fallidos (`SM_LOGIN_MAX_ATTEMPTS`).
-- El WebSocket se autentica en el *handshake* y cierra con código 4401 si la sesión caducó.
+- **Cabecera `Host` validada** contra *DNS rebinding*. Sin esto, una web maliciosa abierta
+  desde cualquier equipo de tu red puede hacer que su dominio pase a resolver a la IP de la
+  Pi y hablar con el panel como si fuera mismo origen, con tu cookie incluida. El ataque
+  necesita un dominio, así que por defecto se aceptan IP, `localhost` y nombres
+  `.local`/`.lan`/`.home`/`.internal`, y se rechaza el resto (`SM_ALLOWED_HOSTS` para añadir).
+- **`Origin` validado en el handshake del WebSocket.** Los WebSockets no pasan por CORS:
+  sin esta comprobación cualquier web podría abrir uno contra el panel y el navegador
+  adjuntaría la cookie de sesión (*cross-site WebSocket hijacking*).
+- **CSP con `script-src 'self'`** más `X-Frame-Options`, `nosniff` y `Referrer-Policy`.
+  Ningún script va embebido en el HTML, así que un XSS no llegaría a ejecutarse.
+- Cookie `SameSite=Lax`: es la protección CSRF del panel, ya que impide que la cookie
+  viaje en peticiones POST/DELETE originadas fuera del sitio.
 - `/health` es el único endpoint público, y no expone ninguna métrica del sistema.
 - Terminación de procesos: nunca PID ≤ 1, nunca el propio monitor, nunca los de
   `SM_PROTECTED_PROCESSES`, y por defecto solo los del usuario de la app. Cada intento,
@@ -136,7 +152,7 @@ se comunica solo con color: siempre hay icono o texto al lado.
 
 1. **HTTP plano manda la contraseña en claro.** Para una LAN doméstica suele ser
    aceptable; si algún día lo expones más allá, pon Caddy o nginx con TLS delante y
-   cambia `secure=False` a `True` en la cookie ([routes_auth.py](app/api/routes_auth.py)).
+   pon `SM_COOKIE_SECURE=true`.
 2. **Sin privilegios no se ven los sockets ajenos.** El contenedor corre como usuario
    normal con `cap_drop: ALL`, así que la tabla de conexiones no puede atribuir a su
    proceso los sockets de otros usuarios; la interfaz lo avisa. Descomenta
@@ -166,7 +182,9 @@ una a una en [.env.example](.env.example). Las más relevantes:
 | `SM_SLOW_INTERVAL` | `6.0` | Cadencia de procesos, discos y conexiones. |
 | `SM_RETENTION_DAYS` | `7` | Días de histórico antes de purgar. |
 | `SM_ALLOW_KILL` | `true` | Permite terminar procesos desde la interfaz. |
-| `SM_ALLOW_KILL_FOREIGN` | `false` | Permite terminar procesos de otros usuarios. |
+| `SM_ALLOW_KILL_FOREIGN` | `false` | Permite terminar procesos de otros usuarios. Se respeta también cuando el monitor corre como root. |
+| `SM_COOKIE_SECURE` | `false` | Ponlo a `true` en cuanto haya TLS delante. |
+| `SM_ALLOWED_HOSTS` | — | Nombres extra aceptados en la cabecera `Host`. |
 | `SM_TELEGRAM_BOT_TOKEN` | — | Con `SM_TELEGRAM_CHAT_ID`, activa el sink de Telegram. |
 
 ## API
@@ -188,13 +206,20 @@ Todo requiere sesión salvo `/health`.
 
 ## Desarrollo
 
+Requiere **Python 3.11 o superior** (la imagen Docker va con 3.12).
+
 ```bash
 pip install -r requirements-dev.txt
 cp .env.example .env
 python -m app.metrics.dump --watch   # los colectores, sin servidor de por medio
 python -m app.main                   # servidor en http://localhost:8080
-python -m pytest                     # 38 tests
+python -m pytest                     # 73 tests
+ruff check app tests                 # mismo linter que en CI
 ```
+
+CI ejecuta los tests en Python 3.11/3.12/3.13, construye la imagen para amd64 y
+arm64, y arranca el contenedor sobre Linux real para comprobar `/health` y que los
+colectores ven RAM y particiones.
 
 `python -m app.metrics.dump` es la herramienta para contrastar los números contra
 `htop`, `free -h` y `df -h` sin meter web, WebSockets y base de datos por medio.
@@ -207,6 +232,7 @@ app/
 ├── config.py          configuración (variables SM_*)
 ├── metrics/           colectores puros: no importan api/, storage/ ni alerts/
 ├── core/              scheduler (los tres bucles), hub de WebSockets, seguridad
+│                     y endurecimiento HTTP (Host, CSP, cabeceras)
 ├── storage/           SQLite, agregación por minuto, retención
 ├── alerts/            motor de umbrales y sinks de notificación
 ├── api/               rutas HTTP y endpoint WebSocket

@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 import secrets
+from contextlib import suppress
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field, field_validator
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -25,6 +26,12 @@ class Settings(BaseSettings):
     session_hours: int = 12
     login_max_attempts: int = 8
     login_lockout_seconds: int = 300
+    # Ponlo a true en cuanto haya TLS delante (Caddy, nginx): impide que el
+    # navegador mande la cookie de sesion por HTTP en claro.
+    cookie_secure: bool = False
+    # Nombres de host adicionales aceptados en la cabecera Host. Las IP y los
+    # nombres .local/.lan se aceptan siempre; ver app/core/hostcheck.py.
+    allowed_hosts: str = ""
 
     # Servidor
     host: str = "0.0.0.0"
@@ -76,6 +83,10 @@ class Settings(BaseSettings):
     def extra_mount_list(self) -> list[str]:
         return [m.strip() for m in self.extra_mounts.split(",") if m.strip()]
 
+    @property
+    def allowed_host_list(self) -> list[str]:
+        return [h.strip().lower() for h in self.allowed_hosts.split(",") if h.strip()]
+
     def resolve_secret(self) -> str:
         """Devuelve la clave JWT, generandola y persistiendola la primera vez.
 
@@ -92,10 +103,11 @@ class Settings(BaseSettings):
                 return existing
         generated = secrets.token_urlsafe(48)
         key_file.write_text(generated)
-        try:
+        # Solo el propietario puede leer la clave. En sistemas de ficheros que
+        # no soportan permisos POSIX (un volumen montado desde Windows) esto
+        # simplemente no aplica.
+        with suppress(OSError):
             key_file.chmod(0o600)
-        except OSError:
-            pass
         return generated
 
 

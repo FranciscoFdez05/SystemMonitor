@@ -17,6 +17,11 @@ log = logging.getLogger(__name__)
 ATTRS = ["pid", "name", "username", "cpu_percent", "memory_percent", "memory_info",
          "status", "create_time", "num_threads"]
 
+# SIGKILL no existe en Windows. El objetivo es Linux, pero sin este respaldo el
+# modulo ni siquiera se puede ejercitar en la maquina de desarrollo: la peticion
+# revienta con AttributeError y el cliente recibe un 500 sin explicacion.
+SIGKILL = getattr(signal, "SIGKILL", signal.SIGTERM)
+
 
 class KillError(Exception):
     """Peticion de kill rechazada por politica o imposible de cumplir."""
@@ -56,6 +61,8 @@ class ProcessCollector(Collector):
                 "rss": mem_info.rss if mem_info else 0,
                 "status": info["status"] or "?",
                 "threads": info["num_threads"] or 0,
+                # Puede ser None si no hay permisos para leerlo; la interfaz lo
+                # muestra como "—" en vez de calcular una antiguedad absurda.
                 "started": info["create_time"],
             })
         return rows
@@ -113,15 +120,19 @@ def kill_process(pid: int, force: bool = False) -> dict[str, Any]:
     if name.lower() in settings.protected_list:
         raise KillError(f"'{name}' esta en la lista de procesos protegidos", 403)
 
+    # La restriccion se aplica tambien cuando el monitor corre como root. Antes
+    # se saltaba justo en ese caso, que es precisamente cuando hace falta: como
+    # root el kernel no pone ninguna barrera, asi que si SM_ALLOW_KILL_FOREIGN
+    # esta desactivado la comprobacion tiene que hacerla la aplicacion.
     own_uid = os.getuid() if hasattr(os, "getuid") else None
     if (not settings.allow_kill_foreign and own_uid is not None
-            and own_uid != 0 and proc_uid is not None and proc_uid != own_uid):
+            and proc_uid is not None and proc_uid != own_uid):
         raise KillError(
             f"'{name}' pertenece a otro usuario ({username}). "
             "Activa SM_ALLOW_KILL_FOREIGN si de verdad lo necesitas.", 403)
 
     try:
-        proc.send_signal(signal.SIGKILL if force else signal.SIGTERM)
+        proc.send_signal(SIGKILL if force else signal.SIGTERM)
     except psutil.NoSuchProcess:
         raise KillError(f"El proceso {pid} ya no existe", 404) from None
     except psutil.AccessDenied:

@@ -47,7 +47,7 @@ class Rule(RuleIn):
     created_at: int
 
     @classmethod
-    def from_row(cls, row: dict[str, Any]) -> "Rule":
+    def from_row(cls, row: dict[str, Any]) -> Rule:
         return cls(
             id=row["id"], name=row["name"], metric=row["metric"], target=row["target"],
             operator=row["operator"], threshold=row["threshold"],
