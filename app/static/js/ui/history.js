@@ -24,12 +24,13 @@ const GROUPS = {
     ],
   },
   temp: {
-    axis: { suggestedMax: 85 },
-    format: (v) => `${Number(v).toFixed(1)}°C`,
+    axis: { beginAtZero: false, min: 20, max: 90 },
+    format: (v) => `${Number(v).toFixed(0)}°C`,
     series: [{ key: 'temp_c', label: 'Temperatura', color: COLORS.series[3] }],
   },
   net: {
     axis: {},
+    stableAxis: { floor: 16 * 1024, decayTicks: 1 },
     format: (v) => bps(v),
     series: [
       { key: 'net_rx', label: 'Bajada', color: COLORS.series[0] },
@@ -69,6 +70,7 @@ export class HistoryPanel {
       maxPoints: Number.MAX_SAFE_INTEGER,
       format: group.format,
       axis: group.axis,
+      stableAxis: group.stableAxis ?? null,
     });
   }
 

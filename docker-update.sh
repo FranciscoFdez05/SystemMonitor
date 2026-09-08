@@ -48,6 +48,10 @@ fi
 
 COMPOSE="deploy/docker-compose.yml"
 SERVICIO="systemmonitor"
+# El código sale siempre del repositorio publicado, no de lo que tuviera
+# configurado el clon local.
+SM_REPO="${SM_REPO:-https://github.com/FranciscoFdez05/SystemMonitor.git}"
+RAMA="${SM_RAMA:-main}"
 ESPERA_SALUD=90   # segundos que se le dan a la versión nueva para responder
 
 SIN_PULL=0
@@ -79,6 +83,24 @@ fi
 
 if ! docker info >/dev/null 2>&1; then
     error "Docker no está disponible."
+    exit 1
+fi
+
+# El código viene de GitHub: si esta carpeta no es un clon no hay de dónde
+# tirar, y eso se ve aquí y no a mitad de la actualización.
+if [ "$SIN_PULL" -eq 0 ] && ! git rev-parse --git-dir >/dev/null 2>&1; then
+    error "esta carpeta no es un clon de git; no puede actualizarse sola."
+    echo "       Clónala desde $SM_REPO, o actualiza sin traer código nuevo:" >&2
+    echo "           ./docker-update.sh --sin-pull" >&2
+    exit 1
+fi
+
+# Tras una vuelta atrás se queda en el tag (HEAD suelto) y ahí el pull no sabe
+# qué actualizar. Mejor decirlo que fusionar en un sitio raro.
+if [ "$SIN_PULL" -eq 0 ] && [ "$(git rev-parse --abbrev-ref HEAD)" != "$RAMA" ]; then
+    error "no estás en la rama $RAMA, así que no se actualiza sola."
+    echo "       Vuelve a ella:  git checkout $RAMA" >&2
+    echo "       O actualiza sin traer código nuevo:  ./docker-update.sh --sin-pull" >&2
     exit 1
 fi
 
@@ -142,8 +164,17 @@ fi
 
 # ── 3. Traer los cambios ──────────────────────────────────────────────────────
 if [ "$SIN_PULL" -eq 0 ]; then
-    paso "Descargando la versión nueva"
-    git pull --ff-only
+    paso "Descargando la versión nueva desde GitHub"
+    # Se tira siempre del repositorio publicado. Si el clon apunta a otro sitio
+    # (una copia vieja, un clon hecho desde otra ruta) se corrige aquí, para que
+    # actualizar traiga lo mismo en todas las máquinas.
+    if ! git remote get-url origin >/dev/null 2>&1; then
+        git remote add origin "$SM_REPO"
+    elif [ "$(git remote get-url origin)" != "$SM_REPO" ]; then
+        aviso "origin apuntaba a $(git remote get-url origin); se cambia a $SM_REPO."
+        git remote set-url origin "$SM_REPO"
+    fi
+    git pull --ff-only origin "$RAMA"
 fi
 
 VERSION_NUEVA=$(version_del_codigo)
@@ -206,7 +237,9 @@ if [ "$VERSION_ANTERIOR" != "desconocida" ] \
     SM_VERSION="$VERSION_ANTERIOR" docker compose -f "$COMPOSE" up -d --no-build
     aviso "Se ha vuelto a la $VERSION_ANTERIOR.
 El código del repositorio SÍ está actualizado. Para dejarlo también como estaba:
-    git checkout v${VERSION_ANTERIOR}"
+    git checkout v${VERSION_ANTERIOR}
+Y para poder volver a actualizar, luego:
+    git checkout $RAMA"
 else
     error "no hay imagen etiquetada de la $VERSION_ANTERIOR; no se puede volver sola."
     echo "       Reconstruye desde el código anterior:" >&2

@@ -83,9 +83,11 @@ export const timeAxis = {
   ticks: { maxRotation: 0, autoSkipPadding: 24, color: COLORS.muted },
 };
 
-export function valueAxis({ max = null, suggestedMax = null, format = (v) => v } = {}) {
+export function valueAxis({ min = null, max = null, suggestedMax = null,
+                            beginAtZero = true, format = (v) => v } = {}) {
   return {
-    beginAtZero: true,
+    beginAtZero,
+    min,
     max,
     suggestedMax,
     grid: { color: COLORS.grid, drawTicks: false },

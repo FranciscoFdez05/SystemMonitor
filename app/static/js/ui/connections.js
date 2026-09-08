@@ -16,6 +16,7 @@ export class NetworkPanel {
       ],
       maxPoints: points,
       format: (v) => bps(v),
+      stableAxis: { floor: 64 * 1024, decayTicks: 20 },
     });
 
     this.connections = [];

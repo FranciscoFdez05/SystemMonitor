@@ -1,6 +1,6 @@
 // Panel de resumen: tarjetas de cifras, graficas en vivo y discos.
 
-import { COLORS, statusColor } from '../charts/base.js';
+import { COLORS } from '../charts/base.js';
 import { DonutChart } from '../charts/donut.js';
 import { RealtimeChart } from '../charts/realtime.js';
 import { bps, bytes, clockTime, duration, escapeHtml, pct, usageLevel } from '../format.js';
@@ -20,11 +20,14 @@ export class Overview {
       format: (v) => `${Number(v).toFixed(0)}%`,
       axis: { max: 100 },
     });
+    // Banda fija 20-90 grados en vez de empezar en cero. Una CPU en reposo vive
+    // entre 40 y 60: con el eje desde 0 la linea queda aplastada en el centro y
+    // una subida de 8 grados no se ve. Fija, ademas, no se reescala nunca.
     this.tempChart = new RealtimeChart($('chart-temp'), {
       series: [{ label: 'Temperatura', color: COLORS.series[3] }],
       maxPoints: points,
-      format: (v) => `${Number(v).toFixed(1)}°C`,
-      axis: { suggestedMax: 85 },
+      format: (v) => `${Number(v).toFixed(0)}°C`,
+      axis: { beginAtZero: false, min: 20, max: 90 },
     });
     this.memDonut = new DonutChart($('chart-mem'), { labels: ['Usada', 'Disponible'] });
     this.netChart = new RealtimeChart($('chart-net'), {
@@ -34,6 +37,9 @@ export class Overview {
       ],
       maxPoints: points,
       format: (v) => bps(v),
+      // El trafico va a rafagas: sin techo estable, el eje se reescalaba en
+      // cada tick y la linea daba saltos aunque el trafico fuera el mismo.
+      stableAxis: { floor: 64 * 1024, decayTicks: 20 },
     });
 
     $('cpu-window').textContent = `ventana de ${duration(points * fastInterval)}`;
@@ -185,29 +191,30 @@ export class Overview {
       let entry = this.diskDonuts.get(partition.mount);
       if (!entry) {
         const card = document.createElement('div');
+        card.className = 'disk-tile';
         card.innerHTML = `
-          <div class="card-head" style="margin-bottom:6px">
-            <h2 style="font-size:12px"></h2>
-          </div>
+          <h3></h3>
           <div class="chart-box donut"><canvas></canvas></div>
-          <div class="sub" style="font-size:11px;color:var(--muted);text-align:center"></div>`;
+          <div class="disk-caption"></div>`;
         container.appendChild(card);
         entry = {
           card,
           donut: new DonutChart(card.querySelector('canvas'), { labels: ['Usado', 'Libre'] }),
-          title: card.querySelector('h2'),
-          caption: card.querySelector('.sub'),
+          title: card.querySelector('h3'),
+          caption: card.querySelector('.disk-caption'),
         };
         this.diskDonuts.set(partition.mount, entry);
       }
       entry.title.textContent = partition.mount;
+      entry.card.dataset.level = partition.level;
       // El aviso de "queda menos del 10%" se dice con palabras ademas de con
-      // el color del anillo.
-      const warning = partition.level === 'critical' ? ' ⚠ menos del 10% libre'
-        : partition.level === 'warning' ? ' ⚠ menos del 20% libre' : '';
+      // el color: el borde y el anillo tinen, pero el texto es lo que lo
+      // explica a quien no distinga los tonos.
+      const warning = partition.level === 'critical' ? '⚠ Menos del 10 % libre'
+        : partition.level === 'warning' ? '⚠ Menos del 20 % libre' : '';
       entry.caption.innerHTML =
         `${bytes(partition.free)} libres de ${bytes(partition.total)}` +
-        (warning ? `<br><b style="color:${statusColor(partition.level)}">${warning}</b>` : '');
+        (warning ? `<br><b class="disk-warning">${warning}</b>` : '');
       entry.donut.update({
         used: partition.used,
         total: partition.total,
