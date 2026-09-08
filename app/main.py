@@ -23,8 +23,9 @@ from .api import (
 from .config import BASE_DIR, settings
 from .core.hardening import HostCheckMiddleware, SecurityHeadersMiddleware
 from .core.scheduler import scheduler
-from .core.security import COOKIE_NAME, decode_token
+from .core.security import COOKIE_NAME, MISSING_CREDENTIALS, credentials_configured, decode_token
 from .storage.db import db
+from .version import __version__
 
 logging.basicConfig(
     level=getattr(logging, settings.log_level.upper(), logging.INFO),
@@ -51,6 +52,12 @@ def _warn_if_root() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _warn_if_root()
+    # Se comprueba al arrancar, no al primer login: un panel al que nadie puede
+    # entrar tiene que fallar de inmediato y con un mensaje legible, no soltar
+    # un 500 la primera vez que alguien lo intente.
+    if not credentials_configured():
+        log.error(MISSING_CREDENTIALS)
+        raise RuntimeError(MISSING_CREDENTIALS)
     await db.connect()
     await engine.load()
     await scheduler.start()
@@ -65,7 +72,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="SystemMonitor",
     description="Panel de monitorizacion para Raspberry Pi",
-    version="1.0.0",
+    version=__version__,
     lifespan=lifespan,
     # La documentacion interactiva revelaria la superficie de la API sin login.
     docs_url=None,

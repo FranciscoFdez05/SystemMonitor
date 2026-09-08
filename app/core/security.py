@@ -29,17 +29,36 @@ def hash_password(plain: str) -> str:
     return _hasher.hash(plain)
 
 
-def _expected_hash() -> str:
-    if settings.password_hash:
-        return settings.password_hash
-    if settings.password:
-        # Hashear en cada arranque cuesta una vez y evita guardar la clave en claro.
-        return hash_password(settings.password)
-    raise RuntimeError(
-        "No hay credenciales: define SM_PASSWORD o SM_PASSWORD_HASH en el entorno")
+MISSING_CREDENTIALS = (
+    "No hay credenciales configuradas. Define SM_PASSWORD o SM_PASSWORD_HASH "
+    "en el .env (o ejecuta ./docker-up.sh, que las pide en el primer arranque)."
+)
+
+_password_hash: str | None = None
 
 
-_password_hash = _expected_hash()
+def credentials_configured() -> bool:
+    return bool(settings.password_hash or settings.password)
+
+
+def expected_hash() -> str:
+    """Hash contra el que se verifica el login, calculado una sola vez.
+
+    Perezoso a proposito. Calcularlo al importar el modulo hacia imposible
+    usar `python -m app.tools.hashpw`, que existe justo para cuando todavia no
+    hay credenciales: importar la herramienta reventaba antes de poder generar
+    el hash que le faltaba.
+    """
+    global _password_hash
+    if _password_hash is None:
+        if settings.password_hash:
+            _password_hash = settings.password_hash
+        elif settings.password:
+            # Hashear una vez al primer login evita guardar la clave en claro.
+            _password_hash = hash_password(settings.password)
+        else:
+            raise RuntimeError(MISSING_CREDENTIALS)
+    return _password_hash
 
 
 def verify_credentials(username: str, password: str) -> bool:
@@ -49,7 +68,7 @@ def verify_credentials(username: str, password: str) -> bool:
     # compare_digest evita la misma fuga por el lado del nombre.
     ok_user = secrets.compare_digest(username.encode(), settings.username.encode())
     try:
-        _hasher.verify(_password_hash, password)
+        _hasher.verify(expected_hash(), password)
         ok_pass = True
     except (VerifyMismatchError, InvalidHashError):
         ok_pass = False

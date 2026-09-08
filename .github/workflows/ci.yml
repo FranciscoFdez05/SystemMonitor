@@ -37,6 +37,15 @@ jobs:
           pip install ruff
           ruff check app tests
 
+      # Los scripts de despliegue solo se ejercitan de verdad en Linux. Aqui se
+      # analizan sin ejecutarlos, que es lo unico que puede hacerse sin una Pi.
+      - name: Analizar los scripts de despliegue
+        if: matrix.python == '3.12'
+        run: |
+          sh -n docker-up.sh
+          sh -n docker-update.sh
+          shellcheck -s sh docker-up.sh docker-update.sh
+
       - name: Tests
         run: pytest -q
 

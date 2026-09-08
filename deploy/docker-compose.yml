@@ -5,7 +5,10 @@ services:
     build:
       context: ..
       dockerfile: deploy/Dockerfile
-    image: systemmonitor:latest
+    # Etiquetada con la version, no solo como "latest". Sin esto, la primera
+    # actualizacion no tendria a donde volver: docker-update.sh buscaria la
+    # imagen anterior y solo encontraria "latest", que ya seria la nueva.
+    image: systemmonitor:${SM_VERSION:-latest}
     container_name: systemmonitor
     restart: unless-stopped
 

@@ -16,18 +16,48 @@ en un único contenedor.
 
 ---
 
-## Puesta en marcha con Docker
+## Puesta en marcha
 
 ```bash
 git clone <este-repo> systemmonitor && cd systemmonitor
-cp .env.example .env
-nano .env                      # como mínimo, cambia SM_USERNAME y SM_PASSWORD
-docker compose -f deploy/docker-compose.yml up -d --build
+./docker-up.sh
 ```
 
-Panel en `http://<ip-de-la-pi>:8080`. Comprobación rápida:
+Eso es todo. El script se encarga del primer arranque:
+
+1. Crea el `.env` a partir de `.env.example` y genera `SM_SECRET_KEY`.
+2. Comprueba Docker, que el puerto esté libre y que el host sea Linux de verdad
+   (con Docker Desktop, `pid: host` daría los procesos de la VM, no los tuyos).
+3. Construye la imagen y **te pide usuario y contraseña**. El hash Argon2 se
+   genera dentro de la imagen recién construida, con los mismos parámetros que
+   usará el login; la contraseña en claro no se guarda en ningún sitio.
+4. Levanta el contenedor, espera a que `/health` responda y comprueba que el
+   login funciona antes de darte la URL.
+
+No lo ejecutes con `sudo`: dejaría el `.env` como root y el siguiente arranque
+normal fallaría. Si Docker te pide permisos, añade tu usuario al grupo:
+`sudo usermod -aG docker $USER` y vuelve a iniciar sesión.
+
+### Actualizar
 
 ```bash
+./docker-update.sh
+```
+
+Saca una copia consistente de la base de datos (SQLite en WAL no se puede copiar
+con `cp` en caliente), trae los cambios, reconstruye, y **comprueba que la
+versión nueva arranca**. Si no responde en 90 s, vuelve sola a la imagen
+anterior: cada versión queda etiquetada, así que la vuelta atrás es inmediata en
+vez de una reconstrucción desde el código viejo.
+
+`./docker-update.sh --sin-pull` reconstruye sin traer código nuevo.
+
+### A mano, sin los scripts
+
+```bash
+cp .env.example .env
+nano .env                      # SM_USERNAME y SM_PASSWORD, como mínimo
+docker compose -f deploy/docker-compose.yml up -d --build
 curl http://localhost:8080/health
 docker compose -f deploy/docker-compose.yml logs -f
 ```
@@ -238,6 +268,9 @@ app/
 ├── api/               rutas HTTP y endpoint WebSocket
 ├── templates/         login y dashboard (Jinja2)
 └── static/            CSS, módulos ES y Chart.js vendorizado
+
+docker-up.sh           primer arranque: .env, credenciales, comprobaciones
+docker-update.sh       actualización con copia previa y vuelta atrás
 ```
 
 La regla que mantiene esto ordenado: **`metrics/` no importa nada del resto**.
