@@ -1,0 +1,13 @@
+# Rangos en vez de pines exactos: la imagen Docker fija Python 3.12, pero asi
+# el proyecto tambien se instala en interpretes mas nuevos para desarrollo.
+fastapi>=0.115,<1.0
+uvicorn[standard]>=0.34,<1.0
+psutil>=6.1,<8.0
+aiosqlite>=0.20,<1.0
+pydantic>=2.10,<3.0
+pydantic-settings>=2.7,<3.0
+jinja2>=3.1,<4.0
+python-multipart>=0.0.20
+PyJWT>=2.10,<3.0
+argon2-cffi>=23.1,<26.0
+httpx>=0.28,<1.0

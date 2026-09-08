@@ -1,0 +1,70 @@
+name: systemmonitor
+
+services:
+  systemmonitor:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: systemmonitor:latest
+    container_name: systemmonitor
+    restart: unless-stopped
+
+    # Comparte el PID namespace del host. Es lo que permite a psutil ver los
+    # procesos reales de la Pi sin tocar PROCFS_PATH ni montar /proc a mano.
+    pid: host
+
+    # Comparte la pila de red del host: sin esto las conexiones y los
+    # contadores de trafico serian los del contenedor, que no interesan a nadie.
+    # OJO: con network_mode host la seccion "ports" se ignora; el puerto lo
+    # decide SM_PORT (8080 por defecto).
+    network_mode: host
+
+    env_file:
+      - ../.env
+
+    environment:
+      SM_HOST_ROOT: /host/root
+      SM_SYS_PATH: /host/sys
+      SM_DB_PATH: /data/history.db
+
+    volumes:
+      # El sistema de ficheros del host, solo lectura. statvfs necesita una
+      # ruta real: no basta con /proc.
+      # Si tienes particiones extra montadas bajo / y no aparecen, el bind no
+      # esta propagando los submontajes: cambia a la forma larga con
+      # bind.propagation: rslave, o listalas en SM_EXTRA_MOUNTS.
+      - /:/host/root:ro
+      # Temperatura y estado de throttling de la Pi.
+      - /sys:/host/sys:ro
+      # Opcional: sin esto los procesos del host aparecen con el UID numerico
+      # en vez del nombre de usuario.
+      - /etc/passwd:/etc/passwd:ro
+      # Historico persistente: sobrevive a recrear el contenedor.
+      - sm-data:/data
+
+    # Sin privilegios por defecto. Consecuencia consciente: no se puede
+    # atribuir los sockets de otros usuarios a su proceso, asi que la tabla de
+    # conexiones sale incompleta y la interfaz lo avisa. Si prefieres verlo
+    # todo, descomenta cap_add.
+    cap_drop:
+      - ALL
+    # cap_add:
+    #   - SYS_PTRACE
+    security_opt:
+      - no-new-privileges:true
+
+    # Techo de recursos: el monitor no deberia costar mas que lo que vigila.
+    # En una Pi 4 el consumo real ronda 50-60 MB y menos del 2% de CPU.
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  sm-data:

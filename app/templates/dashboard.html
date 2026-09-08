@@ -1,0 +1,290 @@
+{% extends "base.html" %}
+{% block title %}SystemMonitor{% endblock %}
+{# La cadencia del servidor decide el tamano de la ventana de las graficas. #}
+{% block body_attrs %} data-fast-interval="{{ fast_interval }}" data-slow-interval="{{ slow_interval }}"{% endblock %}
+{% block body %}
+
+<header class="topbar">
+  <div class="brand">
+    <h1>SystemMonitor</h1>
+    <span class="host" id="hostname">…</span>
+    <span class="model" id="model"></span>
+  </div>
+  <div class="topbar-meta">
+    <span>Sistema activo <b id="uptime">—</b></span>
+    <span>Monitor <b id="app-uptime">—</b></span>
+    <span title="Consumo del propio monitor">Coste <b id="app-cost">—</b></span>
+    <span class="conn" id="conn" data-state="connecting">
+      <span class="dot" aria-hidden="true"></span><span id="conn-text">Conectando…</span>
+    </span>
+    <button class="ghost" id="logout" type="button">Salir</button>
+  </div>
+</header>
+
+<nav class="tabs" role="tablist" aria-label="Secciones">
+  <button class="tab" role="tab" data-panel="overview"    aria-selected="true">Resumen</button>
+  <button class="tab" role="tab" data-panel="processes"   aria-selected="false">Procesos</button>
+  <button class="tab" role="tab" data-panel="network"     aria-selected="false">Red</button>
+  <button class="tab" role="tab" data-panel="history"     aria-selected="false">Historico</button>
+  <button class="tab" role="tab" data-panel="alerts"      aria-selected="false">
+    Alertas <span class="badge" id="alert-badge" hidden>0</span>
+  </button>
+</nav>
+
+<main>
+  <!-- ============================================================ RESUMEN -->
+  <section class="panel" id="panel-overview" role="tabpanel">
+    <div class="grid stats">
+      <div class="stat" id="stat-cpu">
+        <div class="label">CPU</div>
+        <div class="value" id="cpu-now">—<small>%</small></div>
+        <div class="detail" id="cpu-detail">—</div>
+        <div class="bar"><span id="cpu-bar" style="width:0"></span></div>
+      </div>
+      <div class="stat" id="stat-temp">
+        <div class="label">Temperatura</div>
+        <div class="value" id="temp-now">—<small>°C</small></div>
+        <div class="detail" id="temp-detail">—</div>
+        <div class="bar"><span id="temp-bar" style="width:0"></span></div>
+      </div>
+      <div class="stat" id="stat-mem">
+        <div class="label">RAM</div>
+        <div class="value" id="mem-now">—<small>%</small></div>
+        <div class="detail" id="mem-detail">—</div>
+        <div class="bar"><span id="mem-bar" style="width:0"></span></div>
+      </div>
+      <div class="stat" id="stat-disk">
+        <div class="label">Disco raiz</div>
+        <div class="value" id="disk-now">—<small>%</small></div>
+        <div class="detail" id="disk-detail">—</div>
+        <div class="bar"><span id="disk-bar" style="width:0"></span></div>
+      </div>
+      <div class="stat" id="stat-net">
+        <div class="label">Red</div>
+        <div class="value" id="net-now">—</div>
+        <div class="detail" id="net-detail">—</div>
+      </div>
+      <div class="stat" id="stat-load">
+        <div class="label">Carga (1/5/15 min)</div>
+        <div class="value" id="load-now">—</div>
+        <div class="detail" id="load-detail">—</div>
+      </div>
+    </div>
+
+    <div class="grid main">
+      <div class="card wide">
+        <div class="card-head">
+          <h2>CPU en tiempo real</h2>
+          <span class="now" id="cpu-chart-now">—%</span>
+          <span class="sub" id="cpu-freq">—</span>
+          <span class="spacer"></span>
+          <span class="sub" id="cpu-window"></span>
+        </div>
+        <div class="chart-box"><canvas id="chart-cpu"></canvas></div>
+        <div class="badges" id="throttle-badges"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h2>Uso por nucleo</h2></div>
+        <div class="cores" id="cores"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>Temperatura</h2>
+          <span class="now" id="temp-chart-now">—°C</span>
+        </div>
+        <div class="chart-box"><canvas id="chart-temp"></canvas></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>Memoria</h2>
+          <span class="now" id="mem-chart-now">—</span>
+        </div>
+        <div class="chart-box donut"><canvas id="chart-mem"></canvas></div>
+        <div id="swap-info" class="sub" style="margin-top:10px;color:var(--text-2);font-size:12px"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>Red en tiempo real</h2>
+          <span class="sub" id="net-chart-now">—</span>
+        </div>
+        <div class="chart-box"><canvas id="chart-net"></canvas></div>
+      </div>
+
+      <div class="card wide">
+        <div class="card-head">
+          <h2>Almacenamiento</h2>
+          <span class="sub" id="disk-io">—</span>
+        </div>
+        <div class="grid disks" id="disks"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- =========================================================== PROCESOS -->
+  <section class="panel" id="panel-processes" role="tabpanel" hidden>
+    <div class="card">
+      <div class="card-head">
+        <h2>Procesos</h2>
+        <span class="sub" id="proc-summary">—</span>
+        <span class="spacer"></span>
+        <input type="text" id="proc-filter" placeholder="Filtrar por nombre, usuario o PID" style="min-width:260px">
+      </div>
+      <div class="table-wrap">
+        <table id="proc-table">
+          <thead>
+            <tr>
+              <th data-sort="pid">PID</th>
+              <th data-sort="name">Nombre</th>
+              <th data-sort="user">Usuario</th>
+              <th data-sort="cpu" aria-sort="descending">CPU %</th>
+              <th data-sort="mem">RAM %</th>
+              <th data-sort="rss">Memoria</th>
+              <th data-sort="threads">Hilos</th>
+              <th data-sort="status">Estado</th>
+              <th data-sort="started">Iniciado</th>
+              <th><span class="sr-only">Acciones</span></th>
+            </tr>
+          </thead>
+          <tbody id="proc-body"></tbody>
+        </table>
+      </div>
+      <div class="empty" id="proc-empty">Cargando procesos…</div>
+    </div>
+  </section>
+
+  <!-- ================================================================ RED -->
+  <section class="panel" id="panel-network" role="tabpanel" hidden>
+    <div class="grid main" style="margin-top:0">
+      <div class="card">
+        <div class="card-head"><h2>Ancho de banda</h2><span class="sub" id="net-panel-now">—</span></div>
+        <div class="chart-box"><canvas id="chart-net2"></canvas></div>
+        <div id="nic-list" class="badges"></div>
+      </div>
+      <div class="card">
+        <div class="card-head">
+          <h2>Procesos con mas conexiones</h2>
+        </div>
+        <div class="notice">
+          Linux no expone bytes de red por proceso: <code>/proc/&lt;pid&gt;/net</code> pertenece al
+          namespace, no al proceso. Esta tabla ordena por conexiones abiertas, que responde a
+          "quien esta hablando con el exterior" sin el coste de nethogs o eBPF.
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Proceso</th><th>PID</th><th>Establecidas</th><th>Escucha</th><th>Total</th></tr></thead>
+            <tbody id="talkers-body"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card wide">
+        <div class="card-head">
+          <h2>Conexiones activas</h2>
+          <span class="sub" id="conn-summary">—</span>
+          <span class="spacer"></span>
+          <select id="conn-state">
+            <option value="">Todos los estados</option>
+            <option value="ESTABLISHED">Establecidas</option>
+            <option value="LISTEN">En escucha</option>
+            <option value="TIME_WAIT">TIME_WAIT</option>
+            <option value="CLOSE_WAIT">CLOSE_WAIT</option>
+          </select>
+          <input type="text" id="conn-filter" placeholder="Filtrar por IP, puerto o proceso" style="min-width:240px">
+        </div>
+        <div class="notice" id="conn-degraded" hidden>
+          Sin privilegios para leer los sockets de otros usuarios: solo se muestran los propios.
+          Anade <code>CAP_SYS_PTRACE</code> al contenedor para ver todas las conexiones.
+        </div>
+        <div class="table-wrap">
+          <table id="conn-table">
+            <thead>
+              <tr>
+                <th data-sort="proto">Proto</th>
+                <th data-sort="laddr">Local</th>
+                <th data-sort="raddr">Remoto</th>
+                <th data-sort="status">Estado</th>
+                <th data-sort="pid">PID</th>
+                <th data-sort="name">Proceso</th>
+              </tr>
+            </thead>
+            <tbody id="conn-body"></tbody>
+          </table>
+        </div>
+        <div class="empty" id="conn-empty">Cargando conexiones…</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========================================================== HISTORICO -->
+  <section class="panel" id="panel-history" role="tabpanel" hidden>
+    <div class="card wide">
+      <div class="card-head">
+        <h2>Historico</h2>
+        <span class="spacer"></span>
+        <select id="history-metric">
+          <option value="usage">Uso: CPU / RAM / Disco (%)</option>
+          <option value="temp">Temperatura (°C)</option>
+          <option value="net">Red (bytes/s)</option>
+          <option value="load">Carga y frecuencia</option>
+        </select>
+        <select id="history-range">
+          <option value="60">Ultima hora</option>
+          <option value="360">Ultimas 6 horas</option>
+          <option value="1440" selected>Ultimas 24 horas</option>
+          <option value="10080">Ultimos 7 dias</option>
+        </select>
+        <button id="history-reload" type="button">Actualizar</button>
+      </div>
+      <div class="chart-box tall"><canvas id="chart-history"></canvas></div>
+      <div class="sub" id="history-info" style="margin-top:10px;color:var(--muted);font-size:12px"></div>
+    </div>
+  </section>
+
+  <!-- ============================================================ ALERTAS -->
+  <section class="panel" id="panel-alerts" role="tabpanel" hidden>
+    <div class="grid main" style="margin-top:0">
+      <div class="card wide">
+        <div class="card-head">
+          <h2>Reglas de umbral</h2>
+          <span class="spacer"></span>
+          <span class="sub" id="sink-status"></span>
+          <button id="rule-new" type="button" class="primary">Nueva regla</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Estado</th><th>Nombre</th><th>Condicion</th><th>Valor actual</th>
+                  <th>Duracion</th><th>Silencio</th><th>Notifica a</th><th></th></tr>
+            </thead>
+            <tbody id="rules-body"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card wide">
+        <div class="card-head">
+          <h2>Ultimos disparos</h2>
+          <span class="spacer"></span>
+          <span class="sub">Probar envio:</span>
+          <span id="sink-tests" class="badges" style="margin:0"></span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Cuando</th><th>Regla</th><th>Estado</th><th>Valor</th><th>Umbral</th><th>Entrega</th></tr></thead>
+            <tbody id="events-body"></tbody>
+          </table>
+        </div>
+        <div class="empty" id="events-empty" hidden>Todavia no ha saltado ninguna alerta.</div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div class="toasts" id="toasts" aria-live="polite"></div>
+<div id="modal-root"></div>
+
+<script src="/static/vendor/chart.umd.min.js"></script>
+<script type="module" src="/static/js/app.js"></script>
+{% endblock %}

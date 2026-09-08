@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Acceder · SystemMonitor{% endblock %}
+{% block body %}
+<div class="login-page">
+  <form class="login-card" id="login-form" autocomplete="on">
+    <h1>SystemMonitor</h1>
+    <p class="sub">Panel de monitorizacion del sistema</p>
+
+    <div class="login-error" id="login-error" hidden role="alert"></div>
+
+    <div class="field">
+      <label for="username">Usuario</label>
+      <input type="text" id="username" name="username" autocomplete="username" required autofocus>
+    </div>
+    <div class="field">
+      <label for="password">Contrasena</label>
+      <input type="password" id="password" name="password" autocomplete="current-password" required>
+    </div>
+    <button type="submit" class="primary" id="submit">Entrar</button>
+  </form>
+</div>
+
+<script type="module">
+  const form = document.getElementById('login-form');
+  const errorBox = document.getElementById('login-error');
+  const submit = document.getElementById('submit');
+
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    errorBox.hidden = true;
+    submit.disabled = true;
+    submit.textContent = 'Comprobando…';
+    try {
+      const response = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: form.username.value,
+          password: form.password.value,
+        }),
+      });
+      if (response.ok) {
+        // La cookie de sesion ya viene puesta en la respuesta.
+        window.location.href = '/';
+        return;
+      }
+      const data = await response.json().catch(() => ({}));
+      errorBox.textContent = data.detail || 'No se pudo iniciar sesion';
+      errorBox.hidden = false;
+      form.password.value = '';
+      form.password.focus();
+    } catch {
+      errorBox.textContent = 'No hay conexion con el servidor';
+      errorBox.hidden = false;
+    } finally {
+      submit.disabled = false;
+      submit.textContent = 'Entrar';
+    }
+  });
+</script>
+{% endblock %}

@@ -1,0 +1,33 @@
+# Alternativa sin Docker. Instalar en /etc/systemd/system/ y:
+#   sudo systemctl daemon-reload && sudo systemctl enable --now systemmonitor
+#
+# Ejecutandose nativo, SM_HOST_ROOT y SM_SYS_PATH se quedan en sus valores por
+# defecto (/ y /sys) y vcgencmd esta disponible como fuente de temperatura.
+
+[Unit]
+Description=SystemMonitor - panel de monitorizacion
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=monitor
+Group=monitor
+WorkingDirectory=/opt/systemmonitor
+EnvironmentFile=/opt/systemmonitor/.env
+ExecStart=/opt/systemmonitor/.venv/bin/python -m app.main
+Restart=on-failure
+RestartSec=5
+
+# Endurecimiento. ProtectProc=default es necesario: con el valor por defecto de
+# systemd (invisible) el servicio solo veria sus propios procesos y la tabla
+# saldria vacia.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ProtectProc=default
+ReadWritePaths=/opt/systemmonitor/data
+
+[Install]
+WantedBy=multi-user.target
