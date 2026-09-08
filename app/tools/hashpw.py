@@ -37,8 +37,12 @@ def _interactive() -> int:
     if password != getpass.getpass("Repite la contrasena: "):
         print("no coinciden", file=sys.stderr)
         return 1
-    print("\nAnade esta linea a tu .env y borra SM_PASSWORD:\n")
-    print(f"SM_PASSWORD_HASH={hash_password(password)}")
+    # Las comillas simples no son decorativas: sin ellas, tanto Docker Compose
+    # como python-dotenv expanden los $ del hash, y el login rechaza incluso la
+    # contrasena correcta con "usuario o contrasena incorrectos".
+    print("\nAnade esta linea a tu .env y borra SM_PASSWORD.")
+    print("Las comillas simples son obligatorias: el hash contiene '$'.\n")
+    print(f"SM_PASSWORD_HASH='{hash_password(password)}'")
     return 0
 
 

@@ -4,9 +4,9 @@
 # Se encarga de lo que hay que hacer antes de "docker compose up":
 #   1. Crear .env (a partir de .env.example) si aún no existe.
 #   2. Generar SM_SECRET_KEY y, en el primer arranque, las credenciales.
-#   3. Comprobar que el host puede dar lo que el compose pide: Linux de verdad
-#      (pid/network host), el puerto libre, y /sys para la temperatura.
-#   4. Leer SM_PORT del .env y usarlo para esperar al arranque y anunciar la URL.
+#   3. Preguntar el puerto en la instalación y comprobar que está libre.
+#   4. Comprobar que el host da lo que el compose pide: Linux de verdad
+#      (pid/network host) y /sys para la temperatura.
 #   5. Esperar al healthcheck y verificar que el login funciona de verdad.
 #
 # Uso: ./docker-up.sh [args extra para docker compose up]
@@ -15,6 +15,10 @@ cd "$(dirname "$0")"
 
 COMPOSE="deploy/docker-compose.yml"
 SERVICIO="systemmonitor"
+# Puerto propuesto en la instalación. Coincide con el defecto de la aplicación
+# (app/config.py) y con el de .env.example: si divergieran, el script esperaría
+# en un puerto y la aplicación escucharía en otro.
+PUERTO_DEFECTO=7000
 
 aviso() { printf '\n\033[33m%s\033[0m\n' "$*" >&2; }
 error() { printf '\n\033[31m%s\033[0m\n' "$*" >&2; }
@@ -105,43 +109,98 @@ else
 fi
 
 # ── Utilidades sobre .env ─────────────────────────────────────────────────────
+# El carácter de comilla simple en una variable: dentro de un script sh no hay
+# forma de escribirlo entre comillas simples, y los patrones de más abajo lo
+# necesitan varias veces.
+COMILLA="'"
+
 env_get() {
-    # Valor de una clave en .env (vacío si no está o está comentada).
+    # Valor de una clave en .env (vacío si no está o está comentada), sin las
+    # comillas que le haya puesto env_set.
     [ -f .env ] || return 0
-    sed -n "s/^$1=//p" .env | head -n 1
+    valor=$(sed -n "s/^$1=//p" .env | head -n 1)
+    case "$valor" in
+        "$COMILLA"*"$COMILLA")
+            valor=${valor#"$COMILLA"}
+            valor=${valor%"$COMILLA"}
+            ;;
+        '"'*'"')
+            valor=${valor#'"'}
+            valor=${valor%'"'}
+            ;;
+    esac
+    printf '%s\n' "$valor"
 }
 
 env_set() {
     # Sustituye la clave si existe, la añade al final si no. Se escribe en un
     # temporal y se renombra para no dejar el .env a medias si algo falla.
     #
-    # Los valores NO se escapan. Aquí no hace falta, al contrario que en otros
-    # proyectos: el compose vive en deploy/, así que el fichero de
-    # interpolación de Compose sería deploy/.env, no este. Este .env llega al
-    # contenedor por "env_file:", que pasa los valores literales. Por eso el
-    # hash de Argon2, que lleva varios '$', viaja intacto. Aun así el arranque
-    # verifica el login al final: si esto cambiase, se vería al momento.
-    #
+    # El valor va ENTRE COMILLAS SIMPLES cuando lo necesita. Compose lee el .env
+    # con reglas dotenv y, en un valor SIN comillas, expande $NOMBRE como si
+    # fuera una variable. El hash de Argon2 empieza por
+    # $argon2id$v=19$m=65536,t=2,p=2$... así que sin comillas llega destrozado al
+    # contenedor: la verificación falla con InvalidHashError y el panel responde
+    # "usuario o contraseña incorrectos" a cualquier intento, incluido el bueno.
+    # Entre comillas simples, dotenv lo toma literal y no expande nada.
+    case "$2" in
+        *"$COMILLA"*)
+            error "el valor de $1 contiene una comilla simple."
+            echo "       No se puede representar sin ambigüedad en .env." >&2
+            exit 1
+            ;;
+    esac
+
+    valor="$2"
+    case "$valor" in
+        # Vacío se deja tal cual: SM_PASSWORD= se lee mejor que SM_PASSWORD=''.
+        "") ;;
+        *'$'*|*' '*|*'#'*|*'"'*|*'`'*) valor="$COMILLA$valor$COMILLA" ;;
+    esac
+
     # El valor se pasa a awk por el entorno, no con -v: awk interpreta las
     # secuencias de escape en los valores de -v, así que un valor con una
     # barra invertida llegaría transformado.
     if grep -q "^$1=" .env; then
-        SM_ENV_VALOR="$2" awk -v k="$1" '
+        SM_ENV_VALOR="$valor" awk -v k="$1" '
             BEGIN { FS = OFS = "="; v = ENVIRON["SM_ENV_VALOR"] }
             $1 == k { print k "=" v; next }
             { print }' .env > .env.tmp
         mv .env.tmp .env
     else
-        printf '%s=%s\n' "$1" "$2" >> .env
+        printf '%s=%s\n' "$1" "$valor" >> .env
     fi
 }
 
+migrar_comillas_del_hash() {
+    # Repara los .env escritos antes de saber que Compose expande los $ de un
+    # valor sin comillas. Sin esto, actualizar el script no arreglaría una
+    # instalación ya rota: el .env no se regenera, y el usuario seguiría sin
+    # poder entrar con la contraseña correcta.
+    linea=$(grep '^SM_PASSWORD_HASH=' .env 2>/dev/null | head -n 1)
+    [ -n "$linea" ] || return 0
+    bruto=${linea#SM_PASSWORD_HASH=}
+    case "$bruto" in
+        "$COMILLA"*"$COMILLA") return 0 ;;   # ya está entrecomillado
+        *'$'*)
+            env_set SM_PASSWORD_HASH "$bruto"
+            aviso "Corregido SM_PASSWORD_HASH en .env: le faltaban las comillas simples.
+Sin ellas, Compose expandía los \$ del hash y el login rechazaba la contraseña buena."
+            ;;
+    esac
+}
+
 # ── 1. .env ───────────────────────────────────────────────────────────────────
+ENV_NUEVO=0
 if [ ! -f .env ]; then
     cp .env.example .env
     chmod 600 .env 2>/dev/null || true
+    ENV_NUEVO=1
     echo "Creado .env a partir de .env.example."
 fi
+
+# Repara instalaciones anteriores antes de leer nada del .env.
+migrar_comillas_del_hash
 
 # ── 2. SM_SECRET_KEY ──────────────────────────────────────────────────────────
 # Firma los tokens de sesión. Cambiarla no destruye nada, pero cierra la sesión
@@ -159,31 +218,79 @@ if [ -z "$(env_get SM_SECRET_KEY)" ]; then
 fi
 
 # ── 3. Puerto ─────────────────────────────────────────────────────────────────
-PORT=$(env_get SM_PORT)
-[ -n "$PORT" ] || PORT=8080
-
 # Con network_mode: host no hay mapeo de puertos: uvicorn se ata directamente al
 # puerto del host. Si ya está ocupado, el contenedor no arranca y se queda
-# reiniciándose en bucle con "address already in use" enterrado en el log.
+# reiniciándose en bucle con "address already in use" enterrado en el log. Por
+# eso el puerto se pregunta y se comprueba ANTES de construir nada.
 puerto_ocupado() {
+    puerto="$1"
     if command -v ss >/dev/null 2>&1; then
-        ss -ltn 2>/dev/null | awk '{print $4}' | grep -qE "[:.]$PORT\$"
+        ss -ltn 2>/dev/null | awk '{print $4}' | grep -qE "[:.]$puerto\$"
     elif command -v netstat >/dev/null 2>&1; then
-        netstat -ltn 2>/dev/null | awk '{print $4}' | grep -qE "[:.]$PORT\$"
+        netstat -ltn 2>/dev/null | awk '{print $4}' | grep -qE "[:.]$puerto\$"
     else
+        # Sin ss ni netstat no se puede saber; se deja pasar en vez de bloquear.
         return 1
     fi
 }
 
-# El propio panel ya en marcha no cuenta: este script también sirve para
-# reiniciarlo tras cambiar el .env.
+puerto_valido() {
+    # Solo dígitos y por encima de 1024: los puertos privilegiados quedan fuera
+    # porque el contenedor corre como usuario sin privilegios y no podría atarse.
+    case "$1" in
+        ''|*[!0-9]*) return 1 ;;
+    esac
+    [ "$1" -ge 1024 ] && [ "$1" -le 65535 ]
+}
+
+# El propio panel ya en marcha no cuenta como puerto ocupado: este script
+# también sirve para reiniciarlo tras cambiar el .env.
 YA_EN_MARCHA=$(docker compose -f "$COMPOSE" ps -q "$SERVICIO" 2>/dev/null || true)
-if [ -z "$YA_EN_MARCHA" ] && puerto_ocupado; then
+
+PORT=$(env_get SM_PORT)
+[ -n "$PORT" ] || PORT="$PUERTO_DEFECTO"
+
+# Se pregunta al instalar, o si el .env no trae SM_PORT. En los arranques
+# siguientes manda lo que ponga el .env: si preguntara siempre, reiniciar tras
+# cualquier cambio obligaría a reescribir el puerto una y otra vez. Para
+# cambiarlo más adelante se edita SM_PORT en .env y se vuelve a ejecutar.
+if { [ "${ENV_NUEVO:-0}" -eq 1 ] || [ -z "$(env_get SM_PORT)" ]; } && [ -t 0 ]; then
+    paso "Puerto de escucha"
+    while :; do
+        printf '¿Sobre qué puerto funciona la app? [%s]: ' "$PUERTO_DEFECTO"
+        read -r RESPUESTA
+        # Enter sin escribir nada acepta el valor por defecto.
+        [ -n "$RESPUESTA" ] || RESPUESTA="$PUERTO_DEFECTO"
+
+        if ! puerto_valido "$RESPUESTA"; then
+            echo "  '$RESPUESTA' no es un puerto válido (usa un número entre 1024 y 65535)." >&2
+            continue
+        fi
+        if puerto_ocupado "$RESPUESTA"; then
+            echo "  El puerto $RESPUESTA ya está ocupado en este equipo." >&2
+            echo "  Mira quién lo tiene:  sudo ss -ltnp | grep :$RESPUESTA" >&2
+            continue
+        fi
+        PORT="$RESPUESTA"
+        break
+    done
+    env_set SM_PORT "$PORT"
+    echo "Puerto $PORT guardado en .env."
+fi
+
+if ! puerto_valido "$PORT"; then
+    error "SM_PORT='$PORT' no es un puerto válido."
+    echo "       Corrígelo en .env: un número entre 1024 y 65535." >&2
+    exit 1
+fi
+
+if [ -z "$YA_EN_MARCHA" ] && puerto_ocupado "$PORT"; then
     error "el puerto $PORT ya está ocupado en este equipo."
     echo "       Con network_mode: host no hay mapeo que valga: la aplicación se" >&2
     echo "       ata directamente a ese puerto y no arrancaría." >&2
     echo "       Mira quién lo tiene:  sudo ss -ltnp | grep :$PORT" >&2
-    echo "       O elige otro:         cambia SM_PORT en .env" >&2
+    echo "       O elige otro:         cambia SM_PORT en .env y vuelve a ejecutar" >&2
+    echo "                             ./docker-up.sh" >&2
     exit 1
 fi
 
@@ -266,7 +373,6 @@ if [ "$necesita_credenciales" -eq 1 ]; then
     env_set SM_PASSWORD ""
     chmod 600 .env 2>/dev/null || true
     echo "Credenciales guardadas en .env (hash Argon2, la contraseña no se guarda)."
-    CREDENCIALES_NUEVAS=1
 fi
 
 # ── 7. Arranque ───────────────────────────────────────────────────────────────
@@ -311,25 +417,32 @@ if [ "$sano" -eq 0 ]; then
     exit 1
 fi
 
-# ── 8. Verificar que se puede entrar ──────────────────────────────────────────
-# /health responde sin autenticación, así que un panel al que nadie puede entrar
-# lo daría por sano. Con las credenciales recién puestas se comprueba de verdad:
-# es lo que detectaría que el hash no llegó intacto al contenedor.
-if [ "${CREDENCIALES_NUEVAS:-0}" -eq 1 ]; then
-    USUARIO_ENV=$(env_get SM_USERNAME)
-    # Contraseña incorrecta a propósito: un 401 demuestra que el hash se leyó y
-    # se comparó. Un 500 significaría que el contenedor no tiene credenciales
-    # válidas. Así se comprueba sin volver a pedirle la contraseña al usuario ni
-    # dejarla escrita en ningún sitio.
-    CODIGO=$(curl -s -o /dev/null -w '%{http_code}' \
-        -X POST "http://127.0.0.1:$PORT/api/login" \
-        -H 'Content-Type: application/json' \
-        -d "{\"username\":\"$USUARIO_ENV\",\"password\":\"x\"}" 2>/dev/null || echo 000)
-    if [ "$CODIGO" != "401" ]; then
-        aviso "AVISO: la comprobación del login devolvió $CODIGO en vez de 401."
-        echo "       Se esperaba un rechazo limpio de una contraseña incorrecta." >&2
-        echo "       Puede que SM_PASSWORD_HASH no haya llegado intacto al contenedor." >&2
-        echo "       Revisa:  docker compose -f $COMPOSE exec $SERVICIO env | grep SM_PASSWORD_HASH" >&2
+# ── 8. Verificar que las credenciales llegan intactas ─────────────────────────
+# Se compara el hash del .env con el que ve el contenedor. Es la única
+# comprobación que detecta que Compose haya alterado el valor por el camino.
+#
+# Lo que había antes aquí era pedir un login con contraseña incorrecta y esperar
+# un 401. No servía: un hash corrupto da InvalidHashError, que el código traduce
+# a "usuario o contraseña incorrectos", o sea el MISMO 401. La comprobación daba
+# por bueno justo el fallo que pretendía detectar.
+HASH_EN_ENV=$(env_get SM_PASSWORD_HASH)
+if [ -n "$HASH_EN_ENV" ]; then
+    HASH_EN_CONTENEDOR=$(docker compose -f "$COMPOSE" exec -T "$SERVICIO" \
+        printenv SM_PASSWORD_HASH 2>/dev/null | tr -d '\r')
+    if [ -z "$HASH_EN_CONTENEDOR" ]; then
+        aviso "AVISO: no se pudo leer SM_PASSWORD_HASH dentro del contenedor."
+        echo "       Compruébalo a mano si el login te rechaza:" >&2
+        echo "       docker compose -f $COMPOSE exec $SERVICIO printenv SM_PASSWORD_HASH" >&2
+    elif [ "$HASH_EN_CONTENEDOR" != "$HASH_EN_ENV" ]; then
+        error "el hash de la contraseña NO llega intacto al contenedor."
+        echo "       En .env:       $HASH_EN_ENV" >&2
+        echo "       En contenedor: $HASH_EN_CONTENEDOR" >&2
+        echo >&2
+        echo "       Con este hash alterado, el panel rechazará la contraseña correcta" >&2
+        echo "       con el mensaje 'usuario o contraseña incorrectos'." >&2
+        echo "       Comprueba que la línea del .env está entre comillas simples:" >&2
+        echo "           grep '^SM_PASSWORD_HASH=' .env" >&2
+        exit 1
     fi
 fi
 

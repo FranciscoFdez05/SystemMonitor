@@ -62,6 +62,14 @@ def expected_hash() -> str:
 
 
 def verify_credentials(username: str, password: str) -> bool:
+    """Comprueba usuario y contrasena.
+
+    La respuesta HTTP es siempre la misma ("usuario o contrasena incorrectos")
+    para no ayudar a quien pruebe a adivinar. Pero en el log del servidor si se
+    distingue el motivo: sin esto, un hash mal configurado y una contrasena mal
+    tecleada son indistinguibles desde fuera, y el remedio de cada uno no tiene
+    nada que ver.
+    """
     # El hash se verifica SIEMPRE, aunque el usuario no coincida: si se
     # cortocircuitara, la respuesta seria instantanea para un usuario que no
     # existe y lenta para uno que si, revelando cual es el correcto.
@@ -70,8 +78,28 @@ def verify_credentials(username: str, password: str) -> bool:
     try:
         _hasher.verify(expected_hash(), password)
         ok_pass = True
-    except (VerifyMismatchError, InvalidHashError):
+    except VerifyMismatchError:
         ok_pass = False
+    except InvalidHashError:
+        # El valor configurado ni siquiera es un hash Argon2. Casi siempre
+        # significa que SM_PASSWORD_HASH no llego entero hasta aqui.
+        ok_pass = False
+        configurado = expected_hash()
+        log.error(
+            "SM_PASSWORD_HASH no es un hash Argon2 valido, asi que ninguna "
+            "contrasena podra entrar. Deberia empezar por '$argon2id$v=19$m=' "
+            "y empieza por %r (%d caracteres). Comprueba que en el .env va "
+            "entre comillas simples y que llega entero al contenedor.",
+            configurado[:24], len(configurado),
+        )
+
+    if not ok_user:
+        log.warning(
+            "login rechazado: el usuario recibido (%r) no coincide con "
+            "SM_USERNAME (%r)", username, settings.username)
+    elif not ok_pass:
+        log.warning("login rechazado para %r: la contrasena no coincide con el "
+                    "hash configurado", username)
     return ok_user and ok_pass
 
 

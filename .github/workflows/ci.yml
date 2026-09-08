@@ -91,24 +91,24 @@ jobs:
           docker run -d --name sm \
             --pid host --network host \
             -e SM_USERNAME=ci -e SM_PASSWORD=contrasena-de-prueba \
-            -e SM_PORT=8080 -e SM_HOST_ROOT=/host/root -e SM_SYS_PATH=/host/sys \
+            -e SM_PORT=7000 -e SM_HOST_ROOT=/host/root -e SM_SYS_PATH=/host/sys \
             -v /:/host/root:ro -v /sys:/host/sys:ro \
             systemmonitor:ci
 
           for i in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:8080/health > /dev/null; then break; fi
+            if curl -fsS http://127.0.0.1:7000/health > /dev/null; then break; fi
             sleep 1
           done
 
           echo "--- /health ---"
-          curl -fsS http://127.0.0.1:8080/health | tee /tmp/health.json
+          curl -fsS http://127.0.0.1:7000/health | tee /tmp/health.json
           grep -q '"status":"ok"' /tmp/health.json
 
           echo "--- login y metricas ---"
-          curl -fsS -c /tmp/ck.txt -X POST http://127.0.0.1:8080/api/login \
+          curl -fsS -c /tmp/ck.txt -X POST http://127.0.0.1:7000/api/login \
             -H 'Content-Type: application/json' \
             -d '{"username":"ci","password":"contrasena-de-prueba"}' > /dev/null
-          curl -fsS -b /tmp/ck.txt http://127.0.0.1:8080/api/metrics/now \
+          curl -fsS -b /tmp/ck.txt http://127.0.0.1:7000/api/metrics/now \
             | python3 -c "import json,sys; d=json.load(sys.stdin); \
               print('canales:', sorted(d)); \
               assert d['memory']['total'] > 0, 'RAM no detectada'; \

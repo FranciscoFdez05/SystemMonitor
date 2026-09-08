@@ -25,7 +25,7 @@ ENV PATH="/opt/venv/bin:$PATH" \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     SM_HOST=0.0.0.0 \
-    SM_PORT=8080 \
+    SM_PORT=7000 \
     SM_DB_PATH=/data/history.db \
     SM_HOST_ROOT=/host/root \
     SM_SYS_PATH=/host/sys
@@ -42,7 +42,7 @@ WORKDIR /srv
 COPY --chown=monitor:monitor app ./app
 
 USER monitor
-EXPOSE 8080
+EXPOSE 7000
 VOLUME ["/data"]
 
 # Sin curl en la imagen: urllib ya viene con Python y evita 10 MB de paquete.
@@ -50,7 +50,7 @@ VOLUME ["/data"]
 # detecta un monitor "vivo pero roto", no solo un proceso caido.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD python -c "import os,urllib.request,sys; \
-url=f\"http://127.0.0.1:{os.environ.get('SM_PORT','8080')}/health\"; \
+url=f\"http://127.0.0.1:{os.environ.get('SM_PORT','7000')}/health\"; \
 sys.exit(0 if urllib.request.urlopen(url, timeout=4).status == 200 else 1)"
 
 # Un solo worker a proposito: los colectores guardan la lectura anterior para

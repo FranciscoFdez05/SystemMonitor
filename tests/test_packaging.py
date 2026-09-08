@@ -76,10 +76,60 @@ def test_scripts_are_valid_posix_shell(script):
     assert resultado.returncode == 0, resultado.stderr
 
 
+def test_the_default_port_is_the_same_everywhere():
+    """El puerto por defecto está declarado en cuatro sitios y deben coincidir.
+
+    Si divergieran, docker-up.sh esperaría el arranque en un puerto y la
+    aplicación escucharía en otro: el script daría la instalación por fallida
+    aunque el panel estuviese funcionando.
+    """
+    from app.config import Settings
+
+    esperado = Settings.model_fields["port"].default
+
+    ejemplo = (RAIZ / ".env.example").read_text(encoding="utf-8")
+    assert f"SM_PORT={esperado}" in ejemplo
+
+    script = (RAIZ / "docker-up.sh").read_text(encoding="utf-8")
+    assert f"PUERTO_DEFECTO={esperado}" in script
+
+    actualizar = (RAIZ / "docker-update.sh").read_text(encoding="utf-8")
+    assert f'[ -n "$PORT" ] || PORT={esperado}' in actualizar
+
+    dockerfile = (RAIZ / "deploy" / "Dockerfile").read_text(encoding="utf-8")
+    assert f"SM_PORT={esperado}" in dockerfile
+    assert f"EXPOSE {esperado}" in dockerfile
+
+
 def test_compose_tags_the_image_with_the_version():
     """Sin etiqueta de versión, la vuelta atrás de docker-update.sh no tiene a dónde ir."""
     compose = (RAIZ / "deploy" / "docker-compose.yml").read_text(encoding="utf-8")
     assert "image: systemmonitor:${SM_VERSION:-latest}" in compose
+
+
+def test_the_readme_badge_shows_the_current_version():
+    """La insignia es texto fijo: sin este test se queda atrás en silencio."""
+    from app.version import __version__
+
+    readme = (RAIZ / "README.md").read_text(encoding="utf-8")
+    encontrada = re.search(r"badge/versi%C3%B3n-([\d.]+)-", readme)
+    assert encontrada, "no hay insignia de versión en el README"
+    assert encontrada.group(1) == __version__
+
+
+def test_the_readme_badges_match_the_project():
+    """Las insignias son de este proyecto, no copiadas de otro."""
+    readme = (RAIZ / "README.md").read_text(encoding="utf-8")
+    licencia = (RAIZ / "LICENSE").read_text(encoding="utf-8")
+
+    # La licencia declarada tiene que ser la del fichero LICENSE.
+    assert "licencia-MIT-" in readme
+    assert "MIT License" in licencia
+
+    # Y las versiones de Python, las que CI ejercita de verdad.
+    ci = (RAIZ / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    for version in re.findall(r"badge/python-([\d.%\w]+)-", readme)[0].split("%20%7C%20"):
+        assert f'"{version}"' in ci, f"el README anuncia Python {version} y CI no lo prueba"
 
 
 def test_changelog_starts_with_the_current_version():

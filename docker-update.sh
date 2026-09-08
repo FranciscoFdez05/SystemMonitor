@@ -105,7 +105,7 @@ VERSION_ANTERIOR=$(version_del_codigo)
 echo "Versión instalada: $VERSION_ANTERIOR"
 
 PORT=$(sed -n 's/^SM_PORT=//p' .env | head -n 1)
-[ -n "$PORT" ] || PORT=8080
+[ -n "$PORT" ] || PORT=7000
 
 # ── 2. Copia del histórico ────────────────────────────────────────────────────
 # SQLite en modo WAL no se puede copiar con `cp` mientras la aplicación escribe:

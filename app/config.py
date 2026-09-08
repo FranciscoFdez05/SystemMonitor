@@ -35,7 +35,7 @@ class Settings(BaseSettings):
 
     # Servidor
     host: str = "0.0.0.0"
-    port: int = 8080
+    port: int = 7000
     log_level: str = "INFO"
 
     # Cadencias

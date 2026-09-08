@@ -19,7 +19,7 @@ services:
     # Comparte la pila de red del host: sin esto las conexiones y los
     # contadores de trafico serian los del contenedor, que no interesan a nadie.
     # OJO: con network_mode host la seccion "ports" se ignora; el puerto lo
-    # decide SM_PORT (8080 por defecto).
+    # decide SM_PORT (7000 por defecto).
     network_mode: host
 
     env_file:

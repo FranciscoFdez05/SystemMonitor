@@ -1,6 +1,12 @@
 # SystemMonitor
 
 [![CI](../../actions/workflows/ci.yml/badge.svg)](../../actions/workflows/ci.yml)
+![versión](https://img.shields.io/badge/versi%C3%B3n-1.0.0-blue)
+![python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue)
+![licencia](https://img.shields.io/badge/licencia-MIT-green)
+![FastAPI](https://img.shields.io/badge/FastAPI-WebSockets-009688)
+![SQLite](https://img.shields.io/badge/SQLite-hist%C3%B3rico-003B57)
+![arquitectura](https://img.shields.io/badge/docker-arm64%20%7C%20amd64-2496ED)
 
 Panel de monitorización en tiempo real para Raspberry Pi (Ubuntu Server), accesible
 desde cualquier dispositivo de la red local. FastAPI + WebSockets + SQLite, servido
@@ -26,7 +32,8 @@ git clone <este-repo> systemmonitor && cd systemmonitor
 Eso es todo. El script se encarga del primer arranque:
 
 1. Crea el `.env` a partir de `.env.example` y genera `SM_SECRET_KEY`.
-2. Comprueba Docker, que el puerto esté libre y que el host sea Linux de verdad
+2. **Te pregunta el puerto** (por defecto 7000) y comprueba que esté libre antes
+   de construir nada. También comprueba Docker y que el host sea Linux de verdad
    (con Docker Desktop, `pid: host` daría los procesos de la VM, no los tuyos).
 3. Construye la imagen y **te pide usuario y contraseña**. El hash Argon2 se
    genera dentro de la imagen recién construida, con los mismos parámetros que
@@ -58,7 +65,7 @@ vez de una reconstrucción desde el código viejo.
 cp .env.example .env
 nano .env                      # SM_USERNAME y SM_PASSWORD, como mínimo
 docker compose -f deploy/docker-compose.yml up -d --build
-curl http://localhost:8080/health
+curl http://localhost:7000/health
 docker compose -f deploy/docker-compose.yml logs -f
 ```
 
@@ -207,7 +214,7 @@ una a una en [.env.example](.env.example). Las más relevantes:
 | Variable | Por defecto | Para qué |
 |---|---|---|
 | `SM_USERNAME` / `SM_PASSWORD` | `admin` / — | Credenciales. Mejor `SM_PASSWORD_HASH`. |
-| `SM_PORT` | `8080` | Puerto de escucha. |
+| `SM_PORT` | `7000` | Puerto de escucha. Lo pregunta `docker-up.sh` al instalar. |
 | `SM_FAST_INTERVAL` | `2.0` | Cadencia de las métricas en vivo. |
 | `SM_SLOW_INTERVAL` | `6.0` | Cadencia de procesos, discos y conexiones. |
 | `SM_RETENTION_DAYS` | `7` | Días de histórico antes de purgar. |
@@ -242,7 +249,7 @@ Requiere **Python 3.11 o superior** (la imagen Docker va con 3.12).
 pip install -r requirements-dev.txt
 cp .env.example .env
 python -m app.metrics.dump --watch   # los colectores, sin servidor de por medio
-python -m app.main                   # servidor en http://localhost:8080
+python -m app.main                   # servidor en http://localhost:7000
 python -m pytest                     # 73 tests
 ruff check app tests                 # mismo linter que en CI
 ```
