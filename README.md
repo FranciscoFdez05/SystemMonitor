@@ -1,6 +1,6 @@
 # SystemMonitor
 
-[![CI](../../actions/workflows/ci.yml/badge.svg)](../../actions/workflows/ci.yml)
+[![CI](https://github.com/FranciscoFdez05/SystemMonitor/actions/workflows/ci.yml/badge.svg)](https://github.com/FranciscoFdez05/SystemMonitor/actions/workflows/ci.yml)
 ![versión](https://img.shields.io/badge/versi%C3%B3n-1.0.0-blue)
 ![python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue)
 ![licencia](https://img.shields.io/badge/licencia-MIT-green)
@@ -25,7 +25,7 @@ en un único contenedor.
 ## Puesta en marcha
 
 ```bash
-git clone <este-repo> systemmonitor && cd systemmonitor
+git clone https://github.com/FranciscoFdez05/SystemMonitor.git systemmonitor && cd systemmonitor
 ./docker-up.sh
 ```
 
@@ -94,7 +94,7 @@ o enuméralas en `SM_EXTRA_MOUNTS`.
 
 ```bash
 sudo useradd --system --create-home --home-dir /opt/systemmonitor monitor
-sudo -u monitor git clone <este-repo> /opt/systemmonitor
+sudo -u monitor git clone https://github.com/FranciscoFdez05/SystemMonitor.git /opt/systemmonitor
 cd /opt/systemmonitor
 sudo -u monitor python3 -m venv .venv
 sudo -u monitor .venv/bin/pip install -r requirements.txt
